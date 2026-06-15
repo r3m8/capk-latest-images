@@ -1,0 +1,117 @@
+name: Build Ubuntu K8s Container Disk
+
+on:
+  workflow_dispatch:
+    inputs:
+      k8s_version:
+        description: 'Kubernetes version (e.g., 1.36.2)'
+        required: true
+        default: '1.36.2'
+      k8s_deb_revision:
+        description: 'Deb package revision suffix (e.g., 2.1 gives 1.36.2-2.1)'
+        required: true
+        default: '2.1'
+      crictl_version:
+        description: 'crictl version (e.g., 1.36.0)'
+        required: true
+        default: '1.36.0'
+      registry:
+        description: 'Registry path without tag (e.g., quay.io/capk)'
+        required: true
+        default: 'quay.io/capk'
+      registry_hostname:
+        description: 'Registry hostname for docker login'
+        required: true
+        default: 'quay.io'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install QEMU + libvirt + Packer
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 libvirt-daemon-system libvirt-clients \
+            virtinst wget unzip python3 python3-pip curl
+          sudo usermod -aG kvm,libvirt $USER
+
+      - name: Verify KVM is available
+        run: |
+          ls -la /dev/kvm
+          test -e /dev/kvm && test -r /dev/kvm && test -w /dev/kvm && echo "KVM OK" || exit 1
+
+      - name: Clone image-builder
+        run: |
+          git clone https://github.com/kubernetes-sigs/image-builder.git /tmp/image-builder
+
+      - name: Generate k8s version override JSON
+        run: |
+          VERSION="${{ inputs.k8s_version }}"
+          SERIES="v$(echo "$VERSION" | cut -d. -f1-2)"
+
+          cat > /tmp/image-builder/images/capi/k8s-override.json <<EOF
+          {
+            "kubernetes_semver": "v${VERSION}",
+            "kubernetes_series": "${SERIES}",
+            "kubernetes_deb_version": "${VERSION}-${{ inputs.k8s_deb_revision }}",
+            "kubernetes_rpm_version": "${VERSION}",
+            "crictl_version": "${{ inputs.crictl_version }}"
+          }
+          EOF
+
+          echo "--- Override file ---"
+          cat /tmp/image-builder/images/capi/k8s-override.json
+
+      - name: Install image-builder dependencies
+        working-directory: /tmp/image-builder/images/capi
+        run: |
+          make deps-qemu
+
+      - name: Build QCOW2 with Packer (kubevirt target)
+        working-directory: /tmp/image-builder/images/capi
+        run: |
+          export PACKER_VAR_FILES="$(pwd)/k8s-override.json"
+          make build-kubevirt-qemu-ubuntu-2404
+
+      - name: Locate QCOW2 output
+        id: qcow2
+        working-directory: /tmp/image-builder/images/capi
+        run: |
+          QCOW2=$(find output/ -name '*.qcow2' -print -quit)
+          if [ -z "$QCOW2" ]; then
+            echo "ERROR: no QCOW2 found in output/"
+            find output/ -type f
+            exit 1
+          fi
+          echo "path=$QCOW2" >> $GITHUB_OUTPUT
+          echo "QCOW2: $QCOW2 ($(du -h "$QCOW2" | cut -f1))"
+
+      - name: Build container-disk image
+        working-directory: /tmp/image-builder/images/capi
+        env:
+          IMAGE_TAG: "v${{ inputs.k8s_version }}"
+          FULL_IMAGE: "${{ inputs.registry }}/ubuntu-2404-container-disk:v${{ inputs.k8s_version }}"
+        run: |
+          BUILD_DIR=$(mktemp -d)
+          cp "${{ steps.qcow2.outputs.path }}" "${BUILD_DIR}/image.qcow2"
+
+          cat > "${BUILD_DIR}/Dockerfile" << 'DOCKERFILE'
+          FROM scratch
+          ADD --chown=107:107 image.qcow2 /disk/
+          DOCKERFILE
+
+          docker build -t "${FULL_IMAGE}" "${BUILD_DIR}"
+          docker image ls "${FULL_IMAGE}"
+
+      - name: Push to registry
+        env:
+          FULL_IMAGE: "${{ inputs.registry }}/ubuntu-2404-container-disk:v${{ inputs.k8s_version }}"
+        run: |
+          echo "${{ secrets.REGISTRY_PASSWORD }}" | \
+            docker login -u "${{ secrets.REGISTRY_USERNAME }}" \
+            "${{ inputs.registry_hostname }}" --password-stdin
+          docker push "${FULL_IMAGE}"
+          echo "Pushed: ${FULL_IMAGE}"

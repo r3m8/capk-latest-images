@@ -1,0 +1,44 @@
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled]
+  push: {}
+name: e2e
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    if: (github.repository == 'kubernetes-sigs/cluster-api-provider-kubevirt') && contains(github.event.pull_request.labels.*.name, 'ok-to-test')
+    strategy:
+      matrix:
+        prowjobname:
+        - "pull-kubernetes-sigs-cluster-api-provider-kubevirt-e2e"
+        - "pull-cluster-api-provider-kubevirt-capi-1.10-e2e"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          repository: kubevirt/project-infra
+          path: project-infra
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      - name: kubeconfig
+        run: 'echo -e "$KUBECONFIG" > $GITHUB_WORKSPACE/project-infra/.kubeconfig'
+        shell: bash
+        env:
+          KUBECONFIG: ${{secrets.KUBECONFIG}}
+      - name: Test
+        run: |
+          $GITHUB_WORKSPACE/project-infra/hack/mkpj.sh --job ${{ matrix.prowjobname }} --pull-number ${{github.event.number}} --kubeconfig $GITHUB_WORKSPACE/project-infra/.kubeconfig --trigger-job --fail-with-job
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    if: github.repository == 'kubernetes-sigs/cluster-api-provider-kubevirt'
+    steps:
+      - name: Check integration status
+        run: |
+          if [[ "${{ needs.integration-tests.result }}" != "success" ]]; then
+            echo "Integration tests failed or were skipped"
+            exit 1
+          fi
+          echo "All integration tests passed"
