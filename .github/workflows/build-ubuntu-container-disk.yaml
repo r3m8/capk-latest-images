@@ -16,16 +16,15 @@ on:
         required: true
         default: '1.36.0'
       registry:
-        description: 'Registry path without tag (e.g., quay.io/capk)'
+        description: 'Registry path without tag (e.g., ghcr.io/myuser)'
         required: true
-        default: 'quay.io/capk'
-      registry_hostname:
-        description: 'Registry hostname for docker login'
-        required: true
-        default: 'quay.io'
+        default: 'ghcr.io'
 
 jobs:
   build:
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -110,8 +109,7 @@ jobs:
         env:
           FULL_IMAGE: "${{ inputs.registry }}/ubuntu-2404-container-disk:v${{ inputs.k8s_version }}"
         run: |
-          echo "${{ secrets.REGISTRY_PASSWORD }}" | \
-            docker login -u "${{ secrets.REGISTRY_USERNAME }}" \
-            "${{ inputs.registry_hostname }}" --password-stdin
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
           docker push "${FULL_IMAGE}"
           echo "Pushed: ${FULL_IMAGE}"
