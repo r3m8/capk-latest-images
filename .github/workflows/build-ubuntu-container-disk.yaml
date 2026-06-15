@@ -40,6 +40,7 @@ jobs:
       - name: Verify KVM is available
         run: |
           ls -la /dev/kvm
+          sudo chmod 666 /dev/kvm
           test -e /dev/kvm && test -r /dev/kvm && test -w /dev/kvm && echo "KVM OK" || exit 1
 
       - name: Clone image-builder
