@@ -81,7 +81,7 @@ jobs:
         working-directory: /tmp/image-builder/images/capi
         run: |
           OUTDIR=$(find output/ -maxdepth 1 -type d -name 'ubuntu-2404-kube-*' -print -quit)
-          IMGFILE=$(find "${OUTDIR}" -type f ! -name 'Dockerfile' ! -name '*.json' ! -name '*.hcl' -print -quit)
+          IMGFILE=$(find "${OUTDIR}" -type f ! -name '*Dockerfile*' ! -name '*.json' ! -name '*.hcl' -print -quit)
           if [ -z "${IMGFILE}" ]; then
             echo "ERROR: no disk image found in ${OUTDIR}"
             find output/ -type f
