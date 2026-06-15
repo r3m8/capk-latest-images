@@ -30,6 +30,12 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - name: Set image tag
+        id: tag
+        run: |
+          TS=$(date +%Y%m%d-%H%M)
+          echo "value=v${{ inputs.k8s_version }}-${TS}" >> $GITHUB_OUTPUT
+
       - name: Install QEMU + libvirt + Packer
         run: |
           sudo apt-get update
@@ -93,8 +99,8 @@ jobs:
       - name: Build container-disk image
         working-directory: /tmp/image-builder/images/capi
         env:
-          IMAGE_TAG: "v${{ inputs.k8s_version }}"
-          FULL_IMAGE: "${{ inputs.registry }}/ubuntu-2404-container-disk:v${{ inputs.k8s_version }}"
+          IMAGE_TAG: "${{ steps.tag.outputs.value }}"
+          FULL_IMAGE: "${{ inputs.registry }}/ubuntu-2404-container-disk:${{ steps.tag.outputs.value }}"
         run: |
           BUILD_DIR=$(mktemp -d)
           cp "${{ steps.diskimg.outputs.path }}" "${BUILD_DIR}/image.qcow2"
@@ -109,7 +115,7 @@ jobs:
 
       - name: Push to registry
         env:
-          FULL_IMAGE: "${{ inputs.registry }}/ubuntu-2404-container-disk:v${{ inputs.k8s_version }}"
+          FULL_IMAGE: "${{ inputs.registry }}/ubuntu-2404-container-disk:${{ steps.tag.outputs.value }}"
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             docker login ghcr.io -u "${{ github.repository_owner }}" --password-stdin
