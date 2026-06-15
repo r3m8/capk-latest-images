@@ -76,18 +76,19 @@ jobs:
           export PACKER_VAR_FILES="$(pwd)/k8s-override.json"
           make build-kubevirt-qemu-ubuntu-2404
 
-      - name: Locate QCOW2 output
-        id: qcow2
+      - name: Locate disk image output
+        id: diskimg
         working-directory: /tmp/image-builder/images/capi
         run: |
-          QCOW2=$(find output/ -name '*.qcow2' -print -quit)
-          if [ -z "$QCOW2" ]; then
-            echo "ERROR: no QCOW2 found in output/"
+          OUTDIR=$(find output/ -maxdepth 1 -type d -name 'ubuntu-2404-kube-*' -print -quit)
+          IMGFILE=$(find "${OUTDIR}" -type f ! -name 'Dockerfile' ! -name '*.json' ! -name '*.hcl' -print -quit)
+          if [ -z "${IMGFILE}" ]; then
+            echo "ERROR: no disk image found in ${OUTDIR}"
             find output/ -type f
             exit 1
           fi
-          echo "path=$QCOW2" >> $GITHUB_OUTPUT
-          echo "QCOW2: $QCOW2 ($(du -h "$QCOW2" | cut -f1))"
+          echo "path=${IMGFILE}" >> $GITHUB_OUTPUT
+          echo "Image: ${IMGFILE} ($(du -h "${IMGFILE}" | cut -f1))"
 
       - name: Build container-disk image
         working-directory: /tmp/image-builder/images/capi
@@ -96,7 +97,7 @@ jobs:
           FULL_IMAGE: "${{ inputs.registry }}/ubuntu-2404-container-disk:v${{ inputs.k8s_version }}"
         run: |
           BUILD_DIR=$(mktemp -d)
-          cp "${{ steps.qcow2.outputs.path }}" "${BUILD_DIR}/image.qcow2"
+          cp "${{ steps.diskimg.outputs.path }}" "${BUILD_DIR}/image.qcow2"
 
           cat > "${BUILD_DIR}/Dockerfile" << 'DOCKERFILE'
           FROM scratch
